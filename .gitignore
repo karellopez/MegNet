@@ -3,3 +3,9 @@ __pycache__
 *.egg-info
 *pycache*
 *.pyc
+
+#Ignore model weights - will be downloaded from huggingface
+MEGnet/model_v*
+
+#Ignore build artifacts
+dist
