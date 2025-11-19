@@ -34,10 +34,18 @@ def main():
               
         # Download the data
         from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id='jstout211/MEGnetV2',
-            local_dir= _megnet_path,
-            local_dir_use_symlinks=False,  
-            revision=None,
-            allow_patterns=["model_v2/*"]
-        )
+        
+        try:
+            snapshot_download(
+                repo_id='jstout211/MEGnetV2',
+                local_dir= _megnet_path,
+                local_dir_use_symlinks=False,  
+                revision=None,
+                allow_patterns=["model_v2/*"]
+            )
+        except BaseException as e:
+            print('Could not download the weights for classification')
+            print('This is likely an issue with network access to the huggingface repository')
+            print('')
+            print(f'Error:  {e}')
+            
