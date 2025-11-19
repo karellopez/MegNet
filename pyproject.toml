@@ -20,11 +20,12 @@ classifiers=[
         "Operating System :: Linux/Unix",
     ]
 dependencies = [
-    'mne', 'numpy', 'scipy', 'pandas', 'munch', 'nibabel', 'joblib',  'tensorflow==2.15', 'scikit-learn', 'stabilized-ica',
+    'mne', 'numpy', 'scipy', 'pandas', 'munch', 'nibabel', 'joblib',  'tensorflow==2.15', 'scikit-learn', 'huggingface_hub>=0.24.0'
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
+dev = ['stabilized-ica']
 testing = ['datalad','pytest','pygit2']
 training = ['imblearn', 'openxyl', 'smote-variants', 
              'iterative-stratification  @ git+https://github.com/trent-b/iterative-stratification.git@master', 'tensorflow-addons[tensorflow]']
@@ -32,6 +33,7 @@ training = ['imblearn', 'openxyl', 'smote-variants',
 [project.scripts]
 "ICA.py"='MEGnet.prep_inputs.ICA:cmdline'
 "megnet_qc_plots.py"='MEGnet.megnet_qc_plots:main'
+"megnet_init"='MEGnet.megnet_init:main'
 
 
 [tool.setuptools.packages.find]

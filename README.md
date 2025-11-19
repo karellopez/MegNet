@@ -10,6 +10,12 @@ conda activate megnet
 pip install git+https://github.com/nih-megcore/MegNet.git
 ```
 
+## Post install initalization (downloading huggingface model weights)
+```
+megnet_init
+```
+
+
 ## Original Code Repository
 https://github.com/DeepLearningForPrecisionHealthLab/MegNET_2020 <br>
 Manuscript available: https://pubmed.ncbi.nlm.nih.gov/34274419/ <br>
