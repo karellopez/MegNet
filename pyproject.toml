@@ -22,7 +22,7 @@ classifiers=[
 dependencies = [
     'mne', 'numpy', 'scipy', 'pandas', 'munch', 'nibabel', 'joblib',  'tensorflow==2.15', 'scikit-learn', 'huggingface_hub>=0.24.0'
 ]
-dynamic = ["version"]
+verision = "0.3.1"
 
 [project.optional-dependencies]
 dev = ['stabilized-ica']
