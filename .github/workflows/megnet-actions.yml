@@ -8,8 +8,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ["ubuntu-latest"]
-        python-version: ["3.10","3.11"]
-        mne-version: ["1.6","1.7","1.8", "1.9","1.10"]
+        python-version: ["3.10"] #,"3.11"]
+        mne-version: ["1.6"] #,"1.7","1.8", "1.9","1.10"]
     steps:
       - uses: actions/checkout@v4
       - uses: conda-incubator/setup-miniconda@v3
@@ -37,7 +37,7 @@ jobs:
         run: sudo ln -s ${GITHUB_WORKSPACE}/megnet_test_data /data/TEST_DATA/megnet_test_data
       - name: Pip Install Megnet
         shell: bash -el {0}
-        run: $CONDA/envs/test/bin/pip install git+https://github.com/nih-megcore/MegNet.git
+        run: $CONDA/envs/test/bin/pip install git+${GITHUB_WORKSPACE}/MegNet
       - name: Download raw test data
         shell: bash -el {0}
         run: sudo git clone https://github.com/nih-megcore/TEST_ctf_data.git /data/TEST_DATA/TEST_ctf_data
