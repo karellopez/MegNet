@@ -46,7 +46,7 @@ jobs:
         run: pip install pytest pygit2
       - name: Initialize the model weights
         shell: bash -el {0}
-        run: megnet_init
+        run: $CONDA/envs/test/bin/megnet_init
       - name: Pytest
         shell: bash -el {0}
         run: $CONDA/envs/test/bin/pytest
