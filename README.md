@@ -7,7 +7,7 @@ This repository is a fork of the code listed below in the original code referenc
 ```
 conda create -n megnet 'mne>=1.6' 'python<3.12'
 conda activate megnet
-pip install git+https://github.com/nih-megcore/MegNet.git
+pip install MEGgnet-neuro
 ```
 
 ## Post install initalization (downloading huggingface model weights)
