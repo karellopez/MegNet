@@ -552,14 +552,42 @@ def _run_qc_plotting_fallback(ica_file: str, data_file: str, apply_filter: bool)
             _, scores = getattr(ica, f"find_bads_{check}")(raw)
         except Exception:
             continue
-        fig, ax = plt.subplots(figsize=(12, 3))
-        ax.bar(np.arange(len(scores)), scores, color="tab:gray")
-        ax.set_title(f"ICA component scores ({check.upper()})")
-        ax.set_xlabel("ICA component index")
-        ax.set_ylabel("Score")
-        ax.grid(alpha=0.2)
-        fig.tight_layout()
-        _safe_fig_save(fig, op.join(out_dir, f"score_plot_{check.upper()}.png"))
+        try:
+            score_arr = np.asarray(scores, dtype=float)
+            if score_arr.size == 0:
+                continue
+            score_arr = np.squeeze(score_arr)
+            n_comp = int(ica.n_components_)
+
+            # Handle score arrays from single or multiple reference channels.
+            # For multi-channel outputs (e.g., shape (2, n_components)),
+            # aggregate to one value per component using max absolute score.
+            if score_arr.ndim == 1:
+                plot_scores = score_arr
+            elif score_arr.ndim == 2:
+                if score_arr.shape[1] == n_comp:
+                    plot_scores = np.max(np.abs(score_arr), axis=0)
+                elif score_arr.shape[0] == n_comp:
+                    plot_scores = np.max(np.abs(score_arr), axis=1)
+                else:
+                    plot_scores = np.max(np.abs(score_arr), axis=0).reshape(-1)
+            else:
+                reduce_axes = tuple(range(score_arr.ndim - 1))
+                plot_scores = np.max(np.abs(score_arr), axis=reduce_axes).reshape(-1)
+
+            if plot_scores.size == 0:
+                continue
+
+            fig, ax = plt.subplots(figsize=(12, 3))
+            ax.bar(np.arange(plot_scores.size), plot_scores, color="tab:gray")
+            ax.set_title(f"ICA component scores ({check.upper()})")
+            ax.set_xlabel("ICA component index")
+            ax.set_ylabel("Score")
+            ax.grid(alpha=0.2)
+            fig.tight_layout()
+            _safe_fig_save(fig, op.join(out_dir, f"score_plot_{check.upper()}.png"))
+        except Exception as score_exc:
+            print(f"Skipping {check.upper()} score plot in QC fallback: {score_exc}")
 
     print(f"QC fallback plots written to: {out_dir}")
 
@@ -677,43 +705,119 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _exc_info(exc: Exception) -> dict:
+    return {"type": exc.__class__.__name__, "message": str(exc)}
+
+
+def _write_report(report_path: str, report: dict) -> None:
+    parent = op.dirname(report_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    if not op.exists(args.filename):
-        raise FileNotFoundError(f"Input dataset not found: {args.filename}")
-
     os.makedirs(args.results_dir, exist_ok=True)
     file_base = _file_base(args.filename, args.outbasename)
     results_subdir = op.join(args.results_dir, file_base)
+    os.makedirs(results_subdir, exist_ok=True)
+    report_path = args.report_file or op.join(results_subdir, "megnet_summary.json")
+
+    report: dict = {
+        "file_base": file_base,
+        "input_filename": args.filename,
+        "status": "running",
+        "stages": {},
+    }
+    _write_report(report_path, report)
+
+    if not op.exists(args.filename):
+        report["status"] = "failed"
+        report["stages"]["input"] = {
+            "status": "failed",
+            "error": {"type": "FileNotFoundError", "message": f"Input dataset not found: {args.filename}"},
+        }
+        _write_report(report_path, report)
+        print(f"Input dataset not found: {args.filename}")
+        print(f"Summary report: {report_path}")
+        return 1
 
     if not args.skip_init:
-        megnet_init()
+        try:
+            megnet_init()
+            report["stages"]["init"] = {"status": "ok"}
+        except Exception as exc:
+            report["status"] = "failed"
+            report["stages"]["init"] = {"status": "failed", "error": _exc_info(exc)}
+            _write_report(report_path, report)
+            print(f"Initialization failed: {exc}")
+            print(f"Summary report: {report_path}")
+            return 1
+    else:
+        report["stages"]["init"] = {"status": "skipped"}
+    _write_report(report_path, report)
 
     bad_channels = [x.strip() for x in args.bad_channels.split(",") if x.strip()]
 
     if not args.classify_only:
-        run_ica_pipeline(
-            args.filename,
-            outbasename=args.outbasename,
-            mains_freq=args.line_freq,
-            save_preproc=True,
-            save_ica=True,
-            seedval=0,
-            results_dir=args.results_dir,
-            filename_raw=args.filename_raw,
-            do_assess_bads=bool(args.filename_raw),
-            bad_channels=bad_channels,
-        )
+        try:
+            run_ica_pipeline(
+                args.filename,
+                outbasename=args.outbasename,
+                mains_freq=args.line_freq,
+                save_preproc=True,
+                save_ica=True,
+                seedval=0,
+                results_dir=args.results_dir,
+                filename_raw=args.filename_raw,
+                do_assess_bads=bool(args.filename_raw),
+                bad_channels=bad_channels,
+            )
+            report["stages"]["pipeline"] = {"status": "ok"}
+        except Exception as exc:
+            report["status"] = "failed"
+            report["stages"]["pipeline"] = {"status": "failed", "error": _exc_info(exc)}
+            _write_report(report_path, report)
+            print(f"Pipeline failed: {exc}")
+            print(f"Summary report: {report_path}")
+            return 1
+    else:
+        report["stages"]["pipeline"] = {"status": "skipped"}
+    _write_report(report_path, report)
 
-    class_output = classify_ica(
-        results_dir=args.results_dir,
-        outbasename=args.outbasename,
-        filename=args.filename,
-    )
+    try:
+        class_output = classify_ica(
+            results_dir=args.results_dir,
+            outbasename=args.outbasename,
+            filename=args.filename,
+        )
+        report["stages"]["classify"] = {"status": "ok"}
+    except Exception as exc:
+        hint = None
+        if "list index out of range" in str(exc):
+            hint = (
+                "Classification may fail when usable ICA time-series chunks cannot be generated "
+                "(e.g., very short or malformed inputs)."
+            )
+        report["status"] = "failed"
+        out = {"status": "failed", "error": _exc_info(exc)}
+        if hint:
+            out["hint"] = hint
+        report["stages"]["classify"] = out
+        _write_report(report_path, report)
+        print(f"Classification failed: {exc}")
+        if hint:
+            print(hint)
+        print(f"Summary report: {report_path}")
+        return 1
     classes = _to_int_list(class_output["classes"])
     bads_idx = sorted(set(_to_int_list(class_output["bads_idx"])))
+    report.update(_build_report(file_base=file_base, classes=classes, bads_idx=bads_idx))
+    _write_report(report_path, report)
 
     preproc_fif = op.join(results_subdir, f"{file_base}_250srate_meg.fif")
     ica_file = op.join(results_subdir, f"{file_base}_0-ica.fif")
@@ -722,51 +826,79 @@ def main() -> int:
     out_clean = None
     out_ica_applied = None
     if not args.skip_apply:
-        if not op.exists(ica_file):
-            raise FileNotFoundError(
-                f"Cannot apply ICA because this file is missing: {ica_file}. "
-                "Run without --classify-only, or generate ICA first."
+        try:
+            if not op.exists(ica_file):
+                raise FileNotFoundError(
+                    f"Cannot apply ICA because this file is missing: {ica_file}. "
+                    "Run without --classify-only, or generate ICA first."
+                )
+            out_clean = op.join(results_subdir, "ica_clean.fif")
+            out_ica_applied = ica_applied_file
+            _apply_ica_cleanup(
+                raw_dataset=args.filename,
+                ica_path=ica_file,
+                bads_idx=bads_idx,
+                out_clean_path=out_clean,
+                out_ica_applied_path=out_ica_applied,
             )
-        out_clean = op.join(results_subdir, "ica_clean.fif")
-        out_ica_applied = ica_applied_file
-        _apply_ica_cleanup(
-            raw_dataset=args.filename,
-            ica_path=ica_file,
-            bads_idx=bads_idx,
-            out_clean_path=out_clean,
-            out_ica_applied_path=out_ica_applied,
-        )
-
-    report = _build_report(file_base=file_base, classes=classes, bads_idx=bads_idx)
+            report["stages"]["apply"] = {"status": "ok", "ica_clean_file": out_clean, "ica_applied_file": out_ica_applied}
+        except Exception as exc:
+            report["status"] = "failed"
+            report["stages"]["apply"] = {"status": "failed", "error": _exc_info(exc)}
+            _write_report(report_path, report)
+            print(f"ICA apply failed: {exc}")
+            print(f"Summary report: {report_path}")
+            return 1
+    else:
+        report["stages"]["apply"] = {"status": "skipped"}
+    _write_report(report_path, report)
 
     if args.run_qc:
-        if not op.exists(preproc_fif):
-            raise FileNotFoundError(f"QC plotting requires this file: {preproc_fif}")
-        qc_ica_file = out_ica_applied or (ica_applied_file if op.exists(ica_applied_file) else ica_file)
-        if not op.exists(qc_ica_file):
-            raise FileNotFoundError(f"QC plotting requires an ICA file: {qc_ica_file}")
-        _run_qc_plotting(
-            ica_file=qc_ica_file,
-            data_file=preproc_fif,
-            apply_filter=args.qc_apply_filter,
-            block=args.qc_block,
-        )
-        report["qc"] = {"status": "ok", "ica_file": qc_ica_file, "data_file": preproc_fif}
+        try:
+            if not op.exists(preproc_fif):
+                raise FileNotFoundError(f"QC plotting requires this file: {preproc_fif}")
+            qc_ica_file = out_ica_applied or (ica_applied_file if op.exists(ica_applied_file) else ica_file)
+            if not op.exists(qc_ica_file):
+                raise FileNotFoundError(f"QC plotting requires an ICA file: {qc_ica_file}")
+            _run_qc_plotting(
+                ica_file=qc_ica_file,
+                data_file=preproc_fif,
+                apply_filter=args.qc_apply_filter,
+                block=args.qc_block,
+            )
+            report["qc"] = {"status": "ok", "ica_file": qc_ica_file, "data_file": preproc_fif}
+            report["stages"]["qc"] = {"status": "ok"}
+        except Exception as exc:
+            report.setdefault("warnings", []).append(f"QC failed: {exc}")
+            report["stages"]["qc"] = {"status": "failed", "error": _exc_info(exc)}
+            print(f"QC failed: {exc}")
+    else:
+        report["stages"]["qc"] = {"status": "skipped"}
+    _write_report(report_path, report)
 
     if args.run_ref_compare:
-        compare_out_dir = args.compare_out_dir or op.join(results_subdir, "IC_ref_comparisons")
-        compare_info = _run_reference_comparisons(
-            raw_fif_path=preproc_fif,
-            ica_path=ica_file if op.exists(ica_file) else ica_applied_file,
-            classes=classes,
-            output_dir=compare_out_dir,
-            max_seconds=float(args.compare_max_seconds),
-        )
-        report["reference_comparison"] = compare_info
+        try:
+            compare_out_dir = args.compare_out_dir or op.join(results_subdir, "IC_ref_comparisons")
+            compare_info = _run_reference_comparisons(
+                raw_fif_path=preproc_fif,
+                ica_path=ica_file if op.exists(ica_file) else ica_applied_file,
+                classes=classes,
+                output_dir=compare_out_dir,
+                max_seconds=float(args.compare_max_seconds),
+            )
+            report["reference_comparison"] = compare_info
+            report["stages"]["reference_comparison"] = {"status": "ok"}
+        except Exception as exc:
+            report.setdefault("warnings", []).append(f"Reference comparison failed: {exc}")
+            report["stages"]["reference_comparison"] = {"status": "failed", "error": _exc_info(exc)}
+            print(f"Reference comparison failed: {exc}")
+    else:
+        report["stages"]["reference_comparison"] = {"status": "skipped"}
 
-    report_path = args.report_file or op.join(results_subdir, "megnet_summary.json")
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+    if report.get("status") == "running":
+        report["status"] = "ok_with_warnings" if report.get("warnings") else "ok"
+
+    _write_report(report_path, report)
 
     print(f"Results directory: {results_subdir}")
     print(f"Predicted class IDs for components 1..20: {classes}")
@@ -778,6 +910,9 @@ def main() -> int:
     if out_clean is not None and out_ica_applied is not None:
         print(f"ICA-cleaned raw file: {out_clean}")
         print(f"ICA file with exclude list: {out_ica_applied}")
+    if report.get("warnings"):
+        for warning in report["warnings"]:
+            print(f"Warning: {warning}")
 
     return 0
 
