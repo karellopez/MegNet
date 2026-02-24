@@ -166,7 +166,13 @@ def _run_reference_comparisons(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    raw = mne.io.read_raw_fif(raw_fif_path, preload=True, allow_maxshield=True)
+    if raw_fif_path.endswith(".fif"):
+        raw = mne.io.read_raw_fif(raw_fif_path, preload=True, allow_maxshield=True)
+    elif raw_fif_path.endswith(".ds"):
+        raw = mne.io.read_raw_ctf(raw_fif_path, preload=True)
+    else:
+        raw = mne.io.read_raw(raw_fif_path, preload=True)
+
     raw_meg = raw.copy().pick_types(meg=True, eeg=False, ref_meg=False)
     ica = mne.preprocessing.read_ica(ica_path)
     sources = ica.get_sources(raw_meg).get_data()
@@ -481,7 +487,13 @@ def _run_qc_plotting_fallback(ica_file: str, data_file: str, apply_filter: bool)
     os.makedirs(out_dir, exist_ok=True)
 
     ica = mne.preprocessing.read_ica(ica_file)
-    raw = mne.io.read_raw_fif(data_file, allow_maxshield=True, preload=True)
+    if data_file.endswith(".fif"):
+        raw = mne.io.read_raw_fif(data_file, allow_maxshield=True, preload=True)
+    elif data_file.endswith(".ds"):
+        raw = mne.io.read_raw_ctf(data_file, preload=True)
+    else:
+        raw = mne.io.read_raw(data_file, preload=True)
+
     if apply_filter:
         lfreq, hfreq = 1.0, 98.0
         line_freq = raw.info.get("line_freq", None)
@@ -522,7 +534,7 @@ def _run_qc_plotting_fallback(ica_file: str, data_file: str, apply_filter: bool)
     src_fig = ica.plot_sources(raw, picks=range(ica.n_components_), show=False, block=False)
     _safe_fig_save(src_fig, op.join(out_dir, "all_comp_time_series_plot.png"))
 
-    raw_meg = raw.copy().pick_types(meg=True, eeg=False, ref_meg=False)
+    raw_meg = raw.copy().pick_types(meg=True, eeg=False, ref_meg=True)
     sources = ica.get_sources(raw_meg).get_data()
     sfreq = float(raw_meg.info["sfreq"])
     n_show = min(sources.shape[1], max(1, int(sfreq * 60)))
